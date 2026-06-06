@@ -1,0 +1,33 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["dependencies"]
+solc_version = "0.8.30"
+optimizer = true
+optimizer_runs = 1000
+
+[profile.default.fuzz]
+runs = 1000
+
+[profile.default.invariant]
+runs = 64
+depth = 50
+fail_on_revert = false
+
+# CI profile: deep campaigns (activated via FOUNDRY_PROFILE=ci)
+[profile.ci.fuzz]
+runs = 10000
+
+[profile.ci.invariant]
+runs = 500
+depth = 100
+fail_on_revert = false
+# bound randomized timestamp/block warps between handler calls (needed for TWAP invariants)
+max_time_delay = 86400
+max_block_delay = 7200
+
+[dependencies]
+
+[soldeer]
+remappings_generate = true
+remappings_location = "config"
