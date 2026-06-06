@@ -1,0 +1,20 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+env:
+  FOUNDRY_PROFILE: ci
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          cache: true
+      - run: forge soldeer install
+      - run: forge fmt --check
+      - run: forge lint
+      - run: forge build --sizes
+      - run: forge test -vvv
