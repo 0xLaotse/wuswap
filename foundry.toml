@@ -5,6 +5,11 @@ libs = ["dependencies"]
 solc_version = "0.8.30"
 optimizer = true
 optimizer_runs = 1000
+remappings = [
+    "@openzeppelin-contracts-5.6.1/=dependencies/@openzeppelin-contracts-5.6.1/",
+    "forge-std-1.16.1/=dependencies/forge-std-1.16.1/",
+    "solady-0.1.26/=dependencies/solady-0.1.26/",
+]
 
 [profile.default.fuzz]
 runs = 1000
@@ -27,6 +32,9 @@ max_time_delay = 86400
 max_block_delay = 7200
 
 [dependencies]
+forge-std = "1.16.1"
+solady = "0.1.26"
+"@openzeppelin-contracts" = "5.6.1"
 
 [soldeer]
 remappings_generate = true
