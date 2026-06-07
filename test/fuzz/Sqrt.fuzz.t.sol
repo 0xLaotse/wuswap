@@ -15,6 +15,7 @@ contract SqrtFuzzTest is Test {
     function testFuzz_SqrtIsFloor(uint256 x) public pure {
         uint256 z = Math.sqrt(x);
         assertLe(z * z, x);
+        // upper bound only where (z+1)^2 fits in uint256; z near 2^128 would overflow it
         if (z < type(uint128).max) assertGt((z + 1) * (z + 1), x);
     }
 }

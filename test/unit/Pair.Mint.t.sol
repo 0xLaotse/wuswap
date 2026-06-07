@@ -37,6 +37,9 @@ contract PairMintTest is Test {
     function test_TokensWired() public view {
         assertEq(pair.token0(), address(token0));
         assertEq(pair.token1(), address(token1));
+    }
+
+    function test_FactoryIsDeployer() public view {
         assertEq(pair.factory(), address(this));
     }
 }
