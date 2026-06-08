@@ -6,11 +6,14 @@ import {ReentrancyGuardTransient} from "@openzeppelin-contracts/utils/Reentrancy
 import {IWuswapFactory} from "./interfaces/IWuswapFactory.sol";
 import {IERC20Minimal} from "./interfaces/IERC20Minimal.sol";
 import {Math} from "./libraries/Math.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 /// @title wuswap pair — constant-product market maker for a token pair
 /// @notice Holds reserves of token0/token1, mints LP shares against deposits,
 ///         prices swaps along x*y >= k (fees accrete to k).
 contract WuswapPair is WuswapERC20, ReentrancyGuardTransient {
+    using SafeTransferLib for address;
+
     error InsufficientLiquidityMinted();
     error InsufficientLiquidityBurned();
     error InsufficientOutputAmount();
@@ -83,6 +86,35 @@ contract WuswapPair is WuswapERC20, ReentrancyGuardTransient {
         _update(balance0, balance1, r0, r1);
         if (feeOn) kLast = uint256(reserve0) * reserve1;
         emit Mint(msg.sender, amount0, amount1);
+    }
+
+    /// @notice Burn LP shares held by the pair and return the underlying tokens to `to`.
+    /// @dev Transfer-then-call: the LP shares to redeem must already sit in the pair, so a
+    ///      router pulls them in first. Both payouts floor against the pool — dust stays
+    ///      behind, which keeps the share price monotone for the remaining providers.
+    /// @param to recipient of the withdrawn token0/token1
+    /// @return amount0 token0 returned to `to`
+    /// @return amount1 token1 returned to `to`
+    function burn(address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
+        (uint112 r0, uint112 r1,) = getReserves();
+        uint256 balance0 = IERC20Minimal(token0).balanceOf(address(this));
+        uint256 balance1 = IERC20Minimal(token1).balanceOf(address(this));
+        uint256 liquidity = balanceOf(address(this));
+
+        bool feeOn = _mintFee(r0, r1);
+        uint256 supply = totalSupply(); // read after _mintFee so the fee dilution is priced in
+        amount0 = liquidity * balance0 / supply; // floor — pool keeps the dust
+        amount1 = liquidity * balance1 / supply;
+        if (amount0 == 0 || amount1 == 0) revert InsufficientLiquidityBurned();
+        _burn(address(this), liquidity);
+        token0.safeTransfer(to, amount0);
+        token1.safeTransfer(to, amount1);
+        balance0 = IERC20Minimal(token0).balanceOf(address(this));
+        balance1 = IERC20Minimal(token1).balanceOf(address(this));
+
+        _update(balance0, balance1, r0, r1);
+        if (feeOn) kLast = uint256(reserve0) * reserve1;
+        emit Burn(msg.sender, amount0, amount1, to);
     }
 
     function getReserves() public view returns (uint112 r0, uint112 r1, uint32 ts) {

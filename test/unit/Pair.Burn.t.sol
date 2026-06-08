@@ -34,7 +34,7 @@ contract PairBurnTest is Test {
         uint256 liquidity = _mintTo(alice, 1e18, 4e18); // 2e18 - 1000, reserves (1e18, 4e18), supply 2e18
 
         vm.prank(alice);
-        pair.transfer(address(pair), liquidity);
+        assertTrue(pair.transfer(address(pair), liquidity));
         vm.prank(alice);
         (uint256 amount0, uint256 amount1) = pair.burn(alice);
 
@@ -72,7 +72,7 @@ contract PairBurnTest is Test {
         uint256 balance1 = token1.balanceOf(address(pair));
 
         vm.prank(alice);
-        pair.transfer(address(pair), liquidity);
+        assertTrue(pair.transfer(address(pair), liquidity));
         vm.prank(alice);
         (uint256 amount0, uint256 amount1) = pair.burn(alice);
 
