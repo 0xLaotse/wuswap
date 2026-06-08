@@ -4,18 +4,24 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {WuswapPair} from "src/WuswapPair.sol";
 import {MockERC20} from "test/mocks/MockERC20.sol";
+import {FactoryStub} from "test/mocks/FactoryStub.sol";
 
 contract PairMintTest is Test {
+    FactoryStub internal factory;
     WuswapPair internal pair;
     MockERC20 internal token0;
     MockERC20 internal token1;
+
+    address internal alice = makeAddr("alice");
 
     function setUp() public {
         MockERC20 tokenA = new MockERC20("Token A", "TKA", 18);
         MockERC20 tokenB = new MockERC20("Token B", "TKB", 18);
         // mirror the factory's token0 < token1 ordering
         (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
-        pair = new WuswapPair(address(token0), address(token1));
+        // deploy via a stub: mint() reads factory.feeTo(), so the pair needs a real factory
+        factory = new FactoryStub();
+        pair = factory.createPair(address(token0), address(token1));
     }
 
     function test_LpMetadata() public view {
@@ -40,6 +46,6 @@ contract PairMintTest is Test {
     }
 
     function test_FactoryIsDeployer() public view {
-        assertEq(pair.factory(), address(this));
+        assertEq(pair.factory(), address(factory));
     }
 }
