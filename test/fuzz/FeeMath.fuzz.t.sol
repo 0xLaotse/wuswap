@@ -69,8 +69,11 @@ contract FeeMathFuzzTest is Test {
 
     // --- differential: reference quote vs on-chain execution ---
 
-    /// The differential core: an independently computed RefMath quote is exactly what a real
-    /// swap pays out. If the contract's K check and the formula ever disagreed, this breaks.
+    /// The differential core: an independently computed RefMath quote is exactly what a real swap
+    /// pays out, and the reserves move by precisely (+in, -out). The payout assertion alone is weak
+    /// — the optimistic transfer satisfies it whether or not the K check is sound — so pinning the
+    /// reserves is what catches a wrong-but-self-consistent state update. The rejection half (the K
+    /// check actually refusing bad inputs) is proven separately in testFuzz_UnderpaidInputReverts.
     function testFuzz_DifferentialQuoteVsExecution(uint112 res0, uint112 res1, uint256 amountIn) public {
         (uint112 R0, uint112 R1) = _seed(bound(res0, 1e9, 1e30), bound(res1, 1e9, 1e30));
         amountIn = bound(amountIn, 1e6, 1e30);
@@ -81,6 +84,39 @@ contract FeeMathFuzzTest is Test {
         pair.swap(0, expectedOut, bob, "");
 
         assertEq(token1.balanceOf(bob), expectedOut);
+        (uint112 nR0, uint112 nR1,) = pair.getReserves();
+        assertEq(nR0, uint256(R0) + amountIn);
+        assertEq(nR1, uint256(R1) - expectedOut);
+    }
+
+    /// Same differential, reversed: token1 in, token0 out. Drives the amount1In fee term and the
+    /// token0 payout — the symmetric half the forward fuzz leaves dead.
+    function testFuzz_DifferentialQuoteVsExecution_Reverse(uint112 res0, uint112 res1, uint256 amountIn) public {
+        (uint112 R0, uint112 R1) = _seed(bound(res0, 1e9, 1e30), bound(res1, 1e9, 1e30));
+        amountIn = bound(amountIn, 1e6, 1e30);
+        uint256 expectedOut = RefMath.getAmountOut(amountIn, R1, R0); // reserveIn = R1, reserveOut = R0
+        vm.assume(expectedOut > 0);
+
+        token1.mint(address(pair), amountIn);
+        pair.swap(expectedOut, 0, bob, "");
+
+        assertEq(token0.balanceOf(bob), expectedOut);
+        (uint112 nR0, uint112 nR1,) = pair.getReserves();
+        assertEq(nR0, uint256(R0) - expectedOut);
+        assertEq(nR1, uint256(R1) + amountIn);
+    }
+
+    /// The K check must REJECT, not merely accept. Underpaying the canonical input by 0.05% — well
+    /// past the ±1-wei rounding boundary, so it holds at any reserve ratio — always reverts.
+    function testFuzz_UnderpaidInputReverts(uint112 res0, uint112 res1, uint256 amountOut) public {
+        (uint112 R0, uint112 R1) = _seed(bound(res0, 1e15, 1e27), bound(res1, 1e15, 1e27));
+        amountOut = bound(amountOut, uint256(R1) / 1_000_000, uint256(R1) / 4);
+        uint256 amountIn = RefMath.getAmountIn(amountOut, R0, R1);
+        uint256 underpaid = amountIn * 9995 / 10000;
+
+        token0.mint(address(pair), underpaid);
+        vm.expectRevert(WuswapPair.KInvariantViolated.selector);
+        pair.swap(0, amountOut, bob, "");
     }
 
     /// k = r0*r1 can only grow across a swap: fees stay in the pool, never leak out.

@@ -82,4 +82,33 @@ contract PairSwapTest is Test {
         vm.expectRevert(WuswapPair.KInvariantViolated.selector);
         pair.swap(0, amount1Out, bob, "");
     }
+
+    /// Mirror of the happy path in the other direction: pay token1 in, take token0 out. Exercises
+    /// the amount1In fee term and the token0 payout — the symmetric half the forward tests never
+    /// touch, where a dropped fee would otherwise be invisible.
+    function test_Swap_ExactOutput_Reverse() public {
+        (uint112 r0, uint112 r1,) = pair.getReserves();
+        uint256 amount0Out = 1e18;
+        uint256 amount1In = RefMath.getAmountIn(amount0Out, r1, r0); // reserveIn = r1, reserveOut = r0
+
+        token1.mint(address(pair), amount1In);
+        pair.swap(amount0Out, 0, bob, "");
+
+        assertEq(token0.balanceOf(bob), amount0Out);
+        (uint112 nr0, uint112 nr1,) = pair.getReserves();
+        assertEq(nr0, uint256(r0) - amount0Out);
+        assertEq(nr1, uint256(r1) + amount1In);
+    }
+
+    /// One wei short on the token1 input must trip the K check via the amount1In*3 fee term —
+    /// the exact path a forward-only suite leaves dead (a *0 mutation there passes everything else).
+    function test_RevertWhen_UnderpaidInput_Reverse() public {
+        (uint112 r0, uint112 r1,) = pair.getReserves();
+        uint256 amount0Out = 1e18;
+        uint256 amount1In = RefMath.getAmountIn(amount0Out, r1, r0);
+
+        token1.mint(address(pair), amount1In - 1);
+        vm.expectRevert(WuswapPair.KInvariantViolated.selector);
+        pair.swap(amount0Out, 0, bob, "");
+    }
 }
