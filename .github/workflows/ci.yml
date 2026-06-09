@@ -18,3 +18,6 @@ jobs:
       - run: forge lint
       - run: forge build --sizes
       - run: forge test -vvv
+      # gas regression gate — deterministic unit tests only. Fuzz gas (μ) shifts with the
+      # seed and run count, so it is excluded to keep the check non-flaky across the ci profile.
+      - run: NO_COLOR=1 forge snapshot --check --no-match-test "testFuzz" >> "$GITHUB_STEP_SUMMARY"
