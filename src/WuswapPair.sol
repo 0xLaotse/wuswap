@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import {WuswapERC20} from "./WuswapERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin-contracts/utils/ReentrancyGuardTransient.sol";
 import {IWuswapFactory} from "./interfaces/IWuswapFactory.sol";
+import {IWuswapCallee} from "./interfaces/IWuswapCallee.sol";
 import {IERC20Minimal} from "./interfaces/IERC20Minimal.sol";
 import {Math} from "./libraries/Math.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
@@ -115,6 +116,57 @@ contract WuswapPair is WuswapERC20, ReentrancyGuardTransient {
         _update(balance0, balance1, r0, r1);
         if (feeOn) kLast = uint256(reserve0) * reserve1;
         emit Burn(msg.sender, amount0, amount1, to);
+    }
+
+    /// @notice Swap output tokens out to `to`, pricing along the constant-product curve.
+    /// @dev Transfer-then-call: the caller (router) must already have moved the input token into
+    ///      the pair — the credited input is the balance delta the pair sees after paying out.
+    ///      Outputs leave optimistically and an optional `wuswapCall` hook lets `to` source the
+    ///      input mid-call (flash swap). The pair trusts no pricing formula: it pays whatever is
+    ///      asked, then demands the fee-adjusted balances still satisfy x*y >= k. nonReentrant
+    ///      blocks re-entry through the hook.
+    /// @param amount0Out token0 sent to `to`
+    /// @param amount1Out token1 sent to `to`
+    /// @param to recipient of the outputs (and flash-callback target when `data` is non-empty)
+    /// @param data flash-swap payload; empty for a plain swap
+    function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external nonReentrant {
+        if (amount0Out == 0 && amount1Out == 0) revert InsufficientOutputAmount();
+        (uint112 r0, uint112 r1,) = getReserves();
+        if (amount0Out >= r0 || amount1Out >= r1) revert InsufficientLiquidity();
+
+        uint256 balance0;
+        uint256 balance1;
+        {
+            // scope the optimistic payout + balance reads — keeps the live-variable count low
+            // enough to compile without via-IR (mirrors UniswapV2Pair's stack-too-deep guard).
+            if (to == token0 || to == token1) revert InvalidTo();
+            if (amount0Out > 0) token0.safeTransfer(to, amount0Out);
+            if (amount1Out > 0) token1.safeTransfer(to, amount1Out);
+            if (data.length > 0) IWuswapCallee(to).wuswapCall(msg.sender, amount0Out, amount1Out, data);
+            balance0 = IERC20Minimal(token0).balanceOf(address(this));
+            balance1 = IERC20Minimal(token1).balanceOf(address(this));
+        }
+
+        uint256 amount0In;
+        uint256 amount1In;
+        unchecked {
+            // safe: amountXOut < rX checked above, so rX - amountXOut cannot underflow
+            amount0In = balance0 > r0 - amount0Out ? balance0 - (r0 - amount0Out) : 0;
+            amount1In = balance1 > r1 - amount1Out ? balance1 - (r1 - amount1Out) : 0;
+        }
+        if (amount0In == 0 && amount1In == 0) revert InsufficientInputAmount();
+
+        {
+            // scope balance{0,1}Adjusted so they leave the stack before _update/emit (via-IR-free).
+            // verify x*y >= k directly on fee-adjusted balances instead of trusting a pricing path.
+            // 0.3% fee on every input amount; scaling by 1000^2 keeps integer precision.
+            uint256 balance0Adjusted = balance0 * 1000 - amount0In * 3;
+            uint256 balance1Adjusted = balance1 * 1000 - amount1In * 3;
+            if (balance0Adjusted * balance1Adjusted < uint256(r0) * r1 * 1e6) revert KInvariantViolated();
+        }
+
+        _update(balance0, balance1, r0, r1);
+        emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
     }
 
     function getReserves() public view returns (uint112 r0, uint112 r1, uint32 ts) {
